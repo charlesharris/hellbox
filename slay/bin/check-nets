@@ -3,7 +3,18 @@
 # contains. Rails was generated --skip-test, so this is a runnable script
 # rather than a spec; it exits non-zero on failure and is meant for CI or a
 # quick sanity pass after changing a net.
-require_relative "../config/environment"
+#
+# It boots ActiveSupport and the nets rather than the application. Nothing here
+# needs a database, a network or a disc, and requiring the full environment
+# meant none of it could be run without Postgres up — on a laptop, or on the
+# machine that has no drives attached. Identification being replayable offline
+# is the premise the whole catalog is built on; the script that checks it
+# should hold to the same standard.
+require "active_support"
+require "active_support/core_ext/object/blank"
+
+root = File.expand_path("..", __dir__)
+Dir[File.join(root, "app/models/identify/*.rb")].sort.each { |f| require f }
 
 $failures = 0
 def check(what, got, want)
@@ -116,6 +127,88 @@ check("but it is still reported",            w.title, "The Karate Kid")
 class NoKey; def configured? = false; end
 check("unconfigured provider abstains",
       Identify::ProviderNet.new(client: NoKey.new).identify(kk_disc, props), [])
+
+# The case the single-element stubs above could never reach.
+#
+# Every stub in this file used to return exactly one film, so "does the runtime
+# check pick the right one" was never actually asked -- and the answer was no.
+# Scoring ran over the results and then took whichever TMDB returned first,
+# which is by popularity. A real search for "The Karate Kid" puts the 2010
+# remake above the 1984 film, so the disc this project uses as its own worked
+# example proposed the remake and never proposed the film it holds.
+puts "-- ProviderNet, when the search returns more than one film --"
+remake = { provider: "tmdb", provider_id: "38575", title: "The Karate Kid",
+           year: 2010, runtime_seconds: 140 * 60 }
+film   = { provider: "tmdb", provider_id: "9607", title: "The Karate Kid",
+           year: 1984, runtime_seconds: 126 * 60 }
+
+# Deliberately in the order TMDB actually returns them: the remake first.
+both = Identify::ProviderNet.new(client: StubTmdb.new([remake, film]))
+c = both.identify(kk_disc, props).first
+check("runtime chooses the film, not the popular one", c.provider_id, "9607")
+check("and it is not rejected",                        c.rejected?,   false)
+
+# Where runtime cannot separate two results, TMDB's own ranking still decides.
+twin = { provider: "tmdb", provider_id: "111", title: "The Karate Kid",
+         year: 1984, runtime_seconds: 127 * 60 }
+tie = Identify::ProviderNet.new(client: StubTmdb.new([twin, film]))
+check("a tie keeps the provider's own ranking",
+      tie.identify(kk_disc, props).first.provider_id, "111")
+
+puts "-- Resolver, on a match its own net rejected --"
+# A rejected proposal is testimony, not corroboration. It stays visible, but it
+# must not raise the winner and must not fill in what the winner lacks -- which
+# is the whole reason the runtime check exists, and which merging quietly undid.
+named    = Identify::CandidateProposal.new(net: "discname", title: "The Karate Kid",
+                                           confidence: 0.8, why: "read from the DVD text data manager")
+demoted  = Identify::CandidateProposal.new(net: "provider", title: "The Karate Kid",
+                                           year: 2010, provider: "tmdb", provider_id: "38575",
+                                           confidence: 0.4, rejected: true,
+                                           why: "runtime disagrees by 11%")
+r = Identify::Resolver.call([named, demoted])
+check("no agreement bonus from a rejected match", r.best.confidence, 0.8)
+check("it donates no year",                       r.best.year,        nil)
+check("it donates no provider id",                r.best.provider_id, nil)
+check("but its reasoning survives",               r.best.why.include?("set aside"), true)
+
+# An accepted match must still do all of those things.
+agreed = Identify::CandidateProposal.new(net: "provider", title: "The Karate Kid",
+                                         year: 1984, provider: "tmdb", provider_id: "9607",
+                                         confidence: 0.85, why: "runtime agrees within 1%")
+r2 = Identify::Resolver.call([named, agreed])
+check("an accepted match still corroborates", r2.best.confidence > 0.85, true)
+check("and still supplies the id",            r2.best.provider_id, "9607")
+
+puts "-- The whole chain, on the disc that got this wrong --"
+# Mirrors IdentifyDisc: the disc-reading nets, then the provider over what they
+# found, then resolution. IdentifyDisc::NETS is the source of truth for the
+# list; it is repeated here because loading that file would drag in ActiveRecord
+# and this script deliberately runs without a database.
+DISC_NETS = [Identify::DiscNameNet, Identify::LabelNet, Identify::ShapeNet].freeze
+def chain(disc, tmdb)
+  proposals = DISC_NETS.flat_map { |k| k.new.identify(disc) }
+  proposals += Identify::ProviderNet.new(client: tmdb).identify(disc, proposals)
+  Identify::Resolver.call(proposals)
+end
+
+# Volume label DVD_VIDEO, so the label net abstains and the disc's own name is
+# all there is. 7608s of feature against TMDB's 126 minutes.
+kk = fake(label: "DVD_VIDEO", name: "The Karate Kid (Special Edition)", secs: [7608, 225, 119])
+
+good = chain(kk, StubTmdb.new([remake, film]))
+check("the right film wins",           good.best.provider_id, "9607")
+check("with the right year",           good.best.year,        1984)
+check("classified from its shape",     good.best.kind,        "movie")
+check("and it is auto-confirmed",
+      Identify::Decision.status(good, current: "rough"), "confirmed")
+
+# Now the same disc where TMDB offers only the remake. Before the fix this
+# merged to 0.95, adopted year 2010 and tmdb:38575, and filed itself.
+only_remake = chain(kk, StubTmdb.new([remake]))
+check("a rejected match cannot reach 0.95", only_remake.best.confidence < 0.95, true)
+check("nor donate the wrong year",          only_remake.best.year,        nil)
+check("nor the wrong tmdb id",              only_remake.best.provider_id, nil)
+check("the name off the disc still stands", only_remake.best.title, "The Karate Kid")
 
 puts(($failures.zero? ? "\nall checks passed" : "\n#{$failures} FAILED"))
 exit($failures.zero? ? 0 : 1)

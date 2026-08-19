@@ -82,14 +82,5 @@ class IdentifyDisc
     )
   end
 
-  # Only ever moves a disc forward out of "rough". A disc someone has already
-  # confirmed must not be dragged back into the review queue by a re-run.
-  def next_status(result)
-    return @disc.status unless @disc.status == "rough"
-    return "needs_review" if result.best.nil? || result.contested
-    return "needs_review" if result.best.confidence < 0.7
-    # A series still needs a person: episode numbers are not in any of this.
-    return "needs_review" if result.best.kind == "series"
-    "confirmed"
-  end
+  def next_status(result) = Identify::Decision.status(result, current: @disc.status)
 end

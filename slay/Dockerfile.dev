@@ -4,7 +4,7 @@
 # bakes the app into the image. That is the wrong shape here: the app is
 # bind-mounted so it can be edited without a rebuild, and this appliance has no
 # deploy step to speak of.
-FROM ruby:3.3
+FROM ruby:3.4.4
 
 # libpq for the pg gem; the rest is what native extensions want. No node or
 # yarn: Rails 8 uses importmaps and Propshaft, so there is no JavaScript build.

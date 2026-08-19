@@ -11,13 +11,26 @@ module Identify
     # exercise, since a tmdb id is what stops Jellyfin re-matching the file by
     # its name.
     :provider, :provider_id,
+    # Set by a net that checked its own proposal against evidence and found it
+    # wanting: a provider match whose runtime does not agree with the disc,
+    # most often.
+    #
+    # Such a proposal is still worth reporting — an extended cut is not a wrong
+    # film, and a person reading the review queue can tell the difference where
+    # this cannot. What it must not do is corroborate anything. The resolver
+    # treats it as testimony rather than agreement: it earns no confidence for
+    # the proposal it sits beside, and it donates none of its fields.
+    :rejected,
     keyword_init: true
   ) do
     def initialize(**kw)
       super
       self.confidence ||= 0.0
       self.why ||= ""
+      self.rejected = false if rejected.nil?
     end
+
+    def rejected? = !!rejected
 
     # What two nets must share to count as agreeing. "Roman Holiday" and
     # "ROMAN_HOLIDAY" are the same claim from different evidence.
