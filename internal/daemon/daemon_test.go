@@ -27,6 +27,13 @@ func testDaemon(t *testing.T) *Daemon {
 	cfg := config.Default()
 	cfg.RipsDir = filepath.Join(dir, "rips")
 	cfg.WorkDir = filepath.Join(dir, "work")
+	// Every directory the daemon creates has to be redirected, not just the
+	// ones a given test reads. These two were missed, so prepareDirs went on
+	// making /srv/media/transcoded on whatever machine ran the suite — which
+	// passed unnoticed on the Linux box, where /srv is writable and the real
+	// directory was already there, and fails on a Mac, where / is not.
+	cfg.TranscodedDir = filepath.Join(dir, "transcoded")
+	cfg.LibraryDir = filepath.Join(dir, "library")
 	cfg.StatePath = filepath.Join(dir, "state.db")
 	cfg.SocketPath = filepath.Join(dir, "hellbox.sock")
 	cfg.MakeMKVSettingsPath = filepath.Join(dir, "mk", ".MakeMKV", "settings.conf")

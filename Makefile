@@ -26,7 +26,7 @@ RUN_HOME    ?= $(shell getent passwd $(RUN_USER) | cut -d: -f6)
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: all build test vet fmt check clean install install-service uninstall
+.PHONY: all build test vet fmt check crosscheck clean install install-service uninstall
 
 all: build
 
@@ -42,6 +42,19 @@ vet:
 
 fmt:
 	$(GO) fmt ./...
+
+# hellboxd only ever runs on Linux, but it is developed on whatever is to hand
+# and the drive package is where that goes wrong: its ioctls are Linux-only, and
+# the pure parsers they feed used to sit in the same files, so the whole package
+# stopped compiling anywhere else and took the daemon down with it.
+#
+# The parsers now build everywhere and the syscalls are stubbed off Linux. This
+# target is what stops that drifting back — it proves the real target still
+# builds from a machine that is not it.
+crosscheck:
+	GOOS=linux GOARCH=amd64 $(GO) build ./...
+	GOOS=linux GOARCH=arm64 $(GO) build ./...
+	GOOS=linux GOARCH=amd64 $(GO) vet ./...
 
 # Run the startup checks against the real hardware without starting the daemon.
 check: build
