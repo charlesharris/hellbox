@@ -113,12 +113,29 @@ exercises all of it against this shelf's real discs; 24 checks.
 identification can be rewritten and replayed offline. A film match is only
 believed when the disc's own feature runtime agrees with the provider's —
 without that the first search result always wins, which is how a disc becomes
-a film of the same name and none of the same content. The 2010 Karate Kid is
-demoted rather than accepted on exactly that test.
+a film of the same name and none of the same content.
 
-**It needs an API key.** Set `TMDB_API_KEY` in the environment; a personal key
-is free. With none set, the provider net abstains and everything else still
-works.
+> **Corrected 2026-08-19.** This paragraph used to end "The 2010 Karate Kid is
+> demoted rather than accepted on exactly that test." That was true of its
+> confidence and false of its outcome. Scoring ran over the results and then
+> took whichever TMDB returned first, which is by popularity — so the remake
+> was the only candidate proposed, and the resolver then merged it with the
+> name read off the disc, counted it as agreement, and let it donate the year
+> and the tmdb id. The disc auto-confirmed as the 2010 film at 0.95. Fixed in
+> `220dd97`; the runtime check now chooses the match rather than annotating it,
+> and a rejected proposal corroborates nothing.
+
+**It needs an API key, and as of 2026-08-19 that is a requirement rather than a
+recommendation.** Set `TMDB_API_KEY` in the environment; a personal key is
+free. The v3 key is the one to use — nothing here calls a v4 endpoint, so the
+Read Access Token is not needed.
+
+With none set the provider net abstains, everything else still works, and **no
+film auto-files**: a film needs a provider id to be confirmed without a person,
+because a film filed with no `<tmdbid>` is one Jellyfin re-matches by its
+filename, which is the library v2 exists to replace. Discs still identify, and
+still land in review with the name read off the disc and somewhere to supply
+the id. See design-v2.md §5.2.
 
 **TVDB is deliberately not built.** TMDB covers both films and television, and
 v4 gates some TVDB access behind a paid key, so a second provider is additive

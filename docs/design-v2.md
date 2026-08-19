@@ -653,25 +653,63 @@ disc ripped & verified
         ▼
   identification nets run (§5.3)
         │
-        ├─ every net agrees, confidence ≥ threshold ──▶ CONFIRMED ──▶ filed
+        ├─ a film, named with confidence, and a provider id ──▶ CONFIRMED ──▶ filed
         │
-        ├─ nets disagree, or confidence low ──────────▶ NEEDS REVIEW
-        │                                                    │
-        │                                          person corrects it
-        │                                                    ▼
-        └─ no net had anything ───────────────────────▶ CONFIRMED ──▶ filed
+        ├─ nets disagree, or confidence low ──────────────────▶ NEEDS REVIEW
+        │                                                            │
+        ├─ a film with no provider id ────────────────────────▶ NEEDS REVIEW
+        │                                                            │
+        ├─ any series disc ───────────────────────────────────▶ NEEDS REVIEW
+        │                                                            │
+        └─ no net had anything ───────────────────────────────▶ NEEDS REVIEW
+                                                                     │
+                                                           person corrects it
+                                                                     ▼
+                                                                CONFIRMED ──▶ filed
 ```
 
-Auto-file thresholds — **assumed, to be tuned against the real shelf**:
+**Amended 2026-08-19, and now implemented in `Identify::Decision`.** The draft
+above this line put "no net had anything" straight into CONFIRMED, which
+contradicted its own table one paragraph later and was never what the code did.
+The substantive change is the second row:
 
 | Condition | Action |
 |---|---|
-| A film, ≥2 nets agree, confidence ≥ 0.85, one provider match | File |
-| A film, single net, confidence ≥ 0.85 | File |
-| Any series disc where every title maps to a distinct episode with runtime error < 2% | File |
-| Any series disc with an unmapped or ambiguous title | Review |
+| A film, confidence ≥ 0.7, **and a provider id** | File |
+| A film with no provider id, at any confidence | Review |
+| A proposal with no `kind` | Review |
+| Any series disc | Review — until episode alignment exists |
+| Any series disc where every title maps to a distinct episode with runtime error < 2% | File — *not built* |
 | `Contested` (v1's ≤0.2 confidence gap between leaders) | Review |
-| Nothing proposed | Review, filed as `Unsorted/` if never actioned |
+| Nothing proposed | Review |
+
+**Why a provider id rather than a higher confidence.** Confidence answers "how
+sure are the nets about this name". Whether the name may be written into the
+library is a different question, and bundling the two into one number is what
+made the original 0.85 look arbitrary.
+
+`DiscNameNet` reading *The Karate Kid* off the DVD text data manager scores
+0.80 on its own, and that is a correct and well-evidenced answer to the first
+question. Acting on it means filing `Movies/The Karate Kid/` with no year and
+an NFO with no `<tmdbid>` — at which point Jellyfin re-matches the file by its
+name, which is exactly what §5.4 exists to prevent and exactly the library
+Phase F has to go back and clean up. So it is a missing field, and it is
+checked as one.
+
+Nothing is discarded when a disc is held back: it keeps the name the nets
+found, and the review screen already shows the disc's own name beside the
+volume label with somewhere to supply the id. One field, once.
+
+**The accepted cost.** With no `TMDB_API_KEY` the provider net abstains, so no
+film auto-files at all and the review queue holds everything. That is a real
+throughput cost in the unconfigured case and it was taken deliberately with the
+user on 2026-08-19: a personal key is free, and the alternative is silently
+rebuilding the unnamed library that v2 exists to replace.
+
+`CONFIRM_AT` stays at 0.7. In practice a film that has a provider id has been
+corroborated by the provider net and sits at 0.85–0.95 anyway, so raising the
+threshold as well would change almost nothing while adding a second knob for
+one job.
 
 Every auto-filed disc still appears in a "recently filed" list with one-click
 undo, because the threshold will be wrong at first and finding out should be
@@ -1124,6 +1162,32 @@ is the moment the whole design pays out.
    one and could not read Blu-ray at all. It argues for keeping multi-drive
    support working rather than simplifying it away, because the code already
    handles N drives and re-adding one should stay a matter of plugging it in.
+6. **Cross-platform hardware support. Closed 2026-08-19: no.** Raised because
+   development moved to a Mac and the drives did not. hellboxd talks to drives
+   through Linux ioctls — CDROM_DRIVE_STATUS, and SG_IO for region, protection
+   and disc kind — and Docker Desktop cannot pass a USB device into a container
+   on macOS at all, because containers run inside a VM with no sight of host
+   USB. UTM or QEMU could, and would put SG_IO across a virtualised USB bus,
+   which is the exact class of thing §2.1 is about: a wrong region read costs
+   one of five permanent counter decrements.
+
+   Containerising hellboxd on Linux *is* possible — ARM did it, and
+   `/dev/dri` passthrough was verified working (Appendix, arm-qsv notes). It
+   was still rejected, and the reason stands: device passthrough and group-id
+   problems are what motivated leaving ARM.
+
+   **Anything touching a physical drive is Linux, on the host, and that is a
+   requirement rather than a limitation.** With one user and one machine,
+   portability here buys nothing and costs complexity.
+
+   What replaces it is better anyway. `libdvdread` takes a device, a directory
+   holding `VIDEO_TS`, or an ISO; libbluray's tools take a device, a BDMV
+   directory or an ISO. So the whole pipeline below the drive — enumeration,
+   decryption, playlist selection, PAL detection, verification, identification
+   — runs against an image, anywhere, in seconds rather than hours, and gives
+   the same answer twice. That is where every bug so far has actually been.
+   `HELLBOX_DVD_SOURCE` and `HELLBOX_BD_SOURCE` are what the hardware tests
+   read; they were `_DEVICE` and the rename is the point.
 
 ---
 

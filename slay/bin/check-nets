@@ -210,5 +210,46 @@ check("nor donate the wrong year",          only_remake.best.year,        nil)
 check("nor the wrong tmdb id",              only_remake.best.provider_id, nil)
 check("the name off the disc still stands", only_remake.best.title, "The Karate Kid")
 
+puts "-- Decision: what may reach the library unseen --"
+# A film is only auto-confirmed with a provider id. Confidence says how sure
+# the nets are about the name; the id says whether the name is worth writing
+# into a directory Jellyfin will read. They are different questions and the
+# second is a missing field, not a low score.
+def outcome(**kw)
+  best = Identify::CandidateProposal.new(**{ net: "discname", title: "The Karate Kid",
+                                             kind: "movie", confidence: 0.9 }.merge(kw))
+  Identify::Decision.status(
+    Identify::Resolver::Result.new(best: best, all: [best], contested: false),
+    current: "rough"
+  )
+end
+
+check("a film with a provider id confirms",
+      outcome(provider: "tmdb", provider_id: "9607"), "confirmed")
+check("a confident film without one does not",
+      outcome, "needs_review")
+check("an empty provider id counts as none",
+      outcome(provider_id: ""), "needs_review")
+check("low confidence still goes to review",
+      outcome(provider_id: "9607", confidence: 0.5), "needs_review")
+check("a series always goes to review",
+      outcome(provider_id: "9607", kind: "series"), "needs_review")
+# FileDisc refuses a disc with no kind, so confirming one only parks it
+# somewhere the dashboard never shows.
+check("no kind goes to review rather than being parked",
+      outcome(provider_id: "9607", kind: nil), "needs_review")
+# A person's decision is never dragged backwards by a re-run.
+check("an already-confirmed disc is left alone",
+      Identify::Decision.status(
+        Identify::Resolver::Result.new(best: nil, all: [], contested: true),
+        current: "confirmed"
+      ), "confirmed")
+
+# And the whole chain, on the disc this all started with.
+check("Karate Kid confirms when TMDB is reachable",
+      Identify::Decision.status(good, current: "rough"), "confirmed")
+check("and waits for a person when the only match was rejected",
+      Identify::Decision.status(only_remake, current: "rough"), "needs_review")
+
 puts(($failures.zero? ? "\nall checks passed" : "\n#{$failures} FAILED"))
 exit($failures.zero? ? 0 : 1)

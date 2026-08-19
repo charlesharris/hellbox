@@ -49,6 +49,13 @@ services:
       RIPS_DIR: /srv/media/rips
       TRANSCODED_DIR: /srv/media/transcoded
       LIBRARY_DIR: /srv/media/library
+      # Identification needs this, and since 2026-08-19 it needs it to file
+      # anything: a film is only confirmed without a person when it has a
+      # provider id, because a film filed with no <tmdbid> is one Jellyfin
+      # re-matches by its filename. A personal v3 key is free. With none set
+      # the provider net abstains, discs still identify, and every film waits
+      # in review. See design-v2.md §5.2.
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
       # Jellyfin is told to rescan after a filing run. Both unset means it is
       # not told, which is only a delay: the files are filed either way and
       # Jellyfin finds them on its own schedule. An API key comes from its

@@ -134,9 +134,9 @@ func TestProviderIDReportsAMissingVMG(t *testing.T) {
 // 2026-08-09 returning "The Karate Kid (Special Edition)" in 5.3 seconds from
 // a disc whose volume label is DVD_VIDEO.
 //
-//	HELLBOX_DVD_DEVICE=/dev/sr0 go test ./internal/dvd/ -run RealDiscTitle -v
+//	HELLBOX_DVD_SOURCE=/dev/sr0 go test ./internal/dvd/ -run RealDiscTitle -v
 func TestRealDiscTitle(t *testing.T) {
-	dev := realDevice(t)
+	dev := realSource(t)
 	got, err := DiscTitle(dev)
 	if err != nil {
 		t.Fatalf("DiscTitle(%s): %v", dev, err)
@@ -149,9 +149,9 @@ func TestRealDiscTitle(t *testing.T) {
 
 // Runs against a disc actually in a drive:
 //
-//	HELLBOX_DVD_DEVICE=/dev/sr0 go test ./internal/dvd/ -run RealProvider -v
+//	HELLBOX_DVD_SOURCE=/dev/sr0 go test ./internal/dvd/ -run RealProvider -v
 func TestRealProviderID(t *testing.T) {
-	dev := realDevice(t)
+	dev := realSource(t)
 	got, err := ProviderID(dev)
 	if err != nil {
 		t.Fatalf("ProviderID(%s): %v", dev, err)

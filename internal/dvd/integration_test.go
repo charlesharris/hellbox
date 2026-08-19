@@ -9,24 +9,26 @@ import (
 	"time"
 
 	"hellbox/internal/library"
+	"hellbox/internal/testsource"
 	"hellbox/internal/verify"
 )
 
-// These run against a disc actually in a drive, and are skipped unless
-// HELLBOX_DVD_DEVICE names one:
+// These run against real media, and are skipped unless HELLBOX_DVD_SOURCE
+// names some:
 //
-//	HELLBOX_DVD_DEVICE=/dev/sr1 go test ./internal/dvd/ -run Real -v -timeout 60m
+//	HELLBOX_DVD_SOURCE=/dev/sr1        go test ./internal/dvd/ -run Real -v -timeout 60m
+//	HELLBOX_DVD_SOURCE=~/discs/kk.iso  go test ./internal/dvd/ -run Real -v -timeout 60m
+//
+// A device, a directory holding VIDEO_TS, or an ISO: libdvdread reads all
+// three and nothing below this cares which it was given. An image is the
+// better default — a drive takes hours, exists on one machine, and gives a
+// different answer if somebody swaps the disc.
 //
 // Extraction is slow enough that it needs an explicit timeout well above the
 // Go default. A DVD reads at a few times realtime at best.
 
-func realDevice(t *testing.T) string {
-	t.Helper()
-	dev := os.Getenv("HELLBOX_DVD_DEVICE")
-	if dev == "" {
-		t.Skip("set HELLBOX_DVD_DEVICE to run against real hardware")
-	}
-	return dev
+func realSource(t *testing.T) string {
+	return testsource.Path(t, "HELLBOX_DVD_SOURCE", "HELLBOX_DVD_DEVICE")
 }
 
 // TestRealEnumerate walks a disc and reports what it found.
@@ -36,7 +38,7 @@ func realDevice(t *testing.T) string {
 // previous run on other hardware — which is the actual point, since the drive
 // this was first measured on has since been removed.
 func TestRealEnumerate(t *testing.T) {
-	dev := realDevice(t)
+	dev := realSource(t)
 
 	e := NewEnumerator()
 	if err := e.Available(); err != nil {
@@ -97,7 +99,7 @@ func TestRealEnumerate(t *testing.T) {
 // The shortest title is chosen so this costs a minute rather than an hour. It
 // exercises exactly the same code path a feature does.
 func TestRealExtractShortestTitle(t *testing.T) {
-	dev := realDevice(t)
+	dev := realSource(t)
 
 	e := NewEnumerator()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)

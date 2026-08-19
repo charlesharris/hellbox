@@ -2,21 +2,18 @@ package identify
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"hellbox/internal/dvd"
+	"hellbox/internal/testsource"
 )
 
 // TestRealDiscIdentifiesFromItsOwnName runs the whole chain against a disc in a
 // drive: read the name off the IFO, feed the nets, resolve.
 //
-//	HELLBOX_DVD_DEVICE=/dev/sr0 go test ./internal/identify/ -run RealDisc -v
+//	HELLBOX_DVD_SOURCE=/dev/sr0 go test ./internal/identify/ -run RealDisc -v
 func TestRealDiscIdentifiesFromItsOwnName(t *testing.T) {
-	dev := os.Getenv("HELLBOX_DVD_DEVICE")
-	if dev == "" {
-		t.Skip("set HELLBOX_DVD_DEVICE to run against real hardware")
-	}
+	dev := testsource.Path(t, "HELLBOX_DVD_SOURCE", "HELLBOX_DVD_DEVICE")
 
 	name, err := dvd.DiscTitle(dev)
 	if err != nil {
