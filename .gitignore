@@ -28,3 +28,8 @@ config.local.toml
 
 # local scratch
 resume-claude.lala
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
+.beads/proxieddb/
