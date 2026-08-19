@@ -1,0 +1,194 @@
+#!/usr/bin/env ruby
+# Checks filing: the names, the sidecars, and a real hardlink cycle.
+#
+# Rails was generated --skip-test, so this is a runnable script in the same
+# shape as bin/check-nets. It exits non-zero on failure.
+#
+# The end-to-end part uses the real database inside a transaction that is
+# rolled back, and a temporary directory for the two media trees. Nothing it
+# does touches /srv/media, so it is safe to run on the machine that holds the
+# collection -- which is the only machine it can run on.
+#
+#   bin/check-filing
+require "tmpdir"
+require "fileutils"
+
+root = Dir.mktmpdir("check-filing")
+ENV["TRANSCODED_DIR"] = File.join(root, "transcoded")
+ENV["LIBRARY_DIR"] = File.join(root, "library")
+ENV.delete("JELLYFIN_URL") # never call out of the process from a check
+
+require_relative "../config/environment"
+
+$failures = 0
+def check(what, got, want)
+  ok = got == want
+  $failures += 1 unless ok
+  puts format("%-4s %-58s %s", ok ? "ok" : "FAIL", what, ok ? "" : "got #{got.inspect}, want #{want.inspect}")
+end
+
+lib = ENV["LIBRARY_DIR"]
+
+puts "-- Naming: the layout Jellyfin parses --"
+check("a film's folder and file share a base",
+      Library::Naming.movie_file("Roman Holiday", 1953),
+      "#{lib}/Movies/Roman Holiday (1953)/Roman Holiday (1953).mkv")
+check("no year, no parenthesis",
+      Library::Naming.movie_base("Earthsea", nil), "Earthsea")
+check("an episode carries SxxExx",
+      Library::Naming.episode_file("Still Game", 3, 5, "Doacters"),
+      "#{lib}/TV/Still Game/Season 03/Still Game - S03E05 - Doacters.mkv")
+check("an unnamed episode is still parseable",
+      File.basename(Library::Naming.episode_file("Still Game", 3, 5, nil)),
+      "Still Game - S03E05.mkv")
+check("an extra sits under extras/",
+      Library::Naming.extra_file(Library::Naming.movie_dir("Roman Holiday", 1953),
+                                 "Roman Holiday (1953)", "Restoring a Classic", 3),
+      "#{lib}/Movies/Roman Holiday (1953)/extras/Roman Holiday (1953) - Restoring a Classic.mkv")
+check("an unnamed extra falls back to its title number",
+      File.basename(Library::Naming.extra_file("/x", "Roman Holiday (1953)", nil, 3)),
+      "Roman Holiday (1953) - t03.mkv")
+
+# A colon is legal on Linux and mangled over SMB, and the television reading
+# this library is on the far end of a share.
+check("a colon cannot reach the filesystem",
+      Library::Naming.clean("Alien: Resurrection"), "Alien Resurrection")
+check("a slash cannot either",
+      Library::Naming.clean("Face/Off"), "Face Off")
+check("trailing dots go",   Library::Naming.clean("Hello..."), "Hello")
+check("the sidecar sits beside its file",
+      Library::Naming.sidecar("/x/A (1953).mkv"), "/x/A (1953).nfo")
+
+puts "-- NFO: what Jellyfin is told rather than left to guess --"
+movie = Library::Nfo.movie(title: "Roman Holiday", year: 1953, provider: "tmdb", provider_id: "804")
+check("the provider id is stated", movie.include?('<uniqueid type="tmdb" default="true">804</uniqueid>'), true)
+check("and in the older form too", movie.include?("<tmdbid>804</tmdbid>"), true)
+check("no empty plot is claimed",  movie.include?("<plot"), false)
+check("markup in a title is escaped",
+      Library::Nfo.movie(title: "Fish & <Chips>").include?("Fish &amp; &lt;Chips&gt;"), true)
+check("an unknown provider writes no id",
+      Library::Nfo.movie(title: "A").include?("uniqueid"), false)
+ep = Library::Nfo.episode(show: "Still Game", season: 3, episode: 5, title: "Doacters")
+check("an episode states its number", ep.include?("<episode>5</episode>"), true)
+check("and its show",                 ep.include?("<showtitle>Still Game</showtitle>"), true)
+check("an unnamed episode still gets a title",
+      Library::Nfo.episode(show: "X", season: 1, episode: 2).include?("<title>Episode 2</title>"), true)
+
+puts "-- Roles: filling in an unset role on a film disc --"
+Fake = Struct.new(:confirmed_kind, :disc_titles, keyword_init: true)
+FakeTitle = Struct.new(:index, :duration_seconds, :role, keyword_init: true)
+def shaped(kind, *secs, roles: nil)
+  titles = secs.each_with_index.map do |s, i|
+    FakeTitle.new(index: i, duration_seconds: s, role: roles ? roles[i] : "unknown")
+  end
+  Fake.new(confirmed_kind: kind, disc_titles: titles)
+end
+
+# Roman Holiday's real runtimes: a feature and six extras.
+roman = Library::Roles.for(shaped("movie", 7068, 1528, 411, 110, 134, 150, 821))
+check("the feature is found on a film disc", roman[0], "feature")
+check("everything else is an extra",         roman[1], "extra")
+check("a lone feature needs no median",
+      Library::Roles.for(shaped("movie", 6000))[0], "feature")
+# Still Game disc 1: six episodes of much the same length, so nothing is
+# lopsided enough to be a feature and guessing would file six wrong files.
+check("an episode disc yields no feature",
+      Library::Roles.feature_index(shaped("movie", 1748, 1740, 1752, 1745, 1750, 1739)), nil)
+check("a television disc is never inferred",
+      Library::Roles.for(shaped("series", 7068, 411, 134))[0], "unknown")
+check("a role a person set is left alone",
+      Library::Roles.for(shaped("movie", 7068, 1528, roles: %w[extra feature]))[0], "extra")
+
+puts "-- Filing: hardlinks, sidecars, never clobbering, and undo --"
+ActiveRecord::Base.transaction do
+  rip = "2026-08-09--roman-holiday--abc123def456"
+  encoded = File.join(ENV["TRANSCODED_DIR"], rip)
+  FileUtils.mkdir_p(encoded)
+  [0, 1].each { |i| File.write(File.join(encoded, format("title_%02d.mkv", i)), "bytes #{i}") }
+  # Title 2 is deliberately not encoded yet: a disc confirmed while the encoder
+  # is still working must file what exists and say what is missing.
+
+  disc = Disc.create!(fingerprint: "check-filing-#{SecureRandom.hex(6)}",
+                      volume_label: "ROMAN_HOLIDAY", rip_dir: "/srv/media/rips/#{rip}",
+                      status: "confirmed", confirmed_kind: "movie",
+                      confirmed_title: "Roman Holiday", confirmed_year: 1953,
+                      provider: "tmdb", provider_id: "804")
+  disc.disc_titles.create!(index: 0, duration_seconds: 7068, role: "feature")
+  disc.disc_titles.create!(index: 1, duration_seconds: 1528, role: "extra",
+                           episode_title: "Restoring a Classic")
+  disc.disc_titles.create!(index: 2, duration_seconds: 411, role: "extra")
+
+  result = FileDisc.call(disc.reload, notify: false)
+  feature = "#{lib}/Movies/Roman Holiday (1953)/Roman Holiday (1953).mkv"
+  extra = "#{lib}/Movies/Roman Holiday (1953)/extras/Roman Holiday (1953) - Restoring a Classic.mkv"
+
+  check("the feature is filed",        File.file?(feature), true)
+  check("the extra is filed",          File.file?(extra), true)
+  check("the sidecar is written",      File.file?(feature.sub(/mkv\z/, "nfo")), true)
+  check("it is a hardlink, not a copy",
+        File.identical?(feature, File.join(encoded, "title_00.mkv")), true)
+  check("the unencoded title is pending", result.pending.map(&:index), [2])
+  check("and the disc is not called filed", disc.reload.status, "confirmed")
+  check("the placement records the path", disc.disc_titles.find_by(index: 0).placement.path, feature)
+  check("the encoded path is written back",
+        disc.disc_titles.find_by(index: 0).encoded_path, File.join(encoded, "title_00.mkv"))
+
+  # The rest of the disc finishes encoding, and filing is run again.
+  File.write(File.join(encoded, "title_02.mkv"), "bytes 2")
+  again = FileDisc.call(disc.reload, notify: false)
+  check("a second run files the rest",  again.pending, [])
+  check("without duplicating the first", again.conflicts, [])
+  check("and now the disc is filed",     disc.reload.status, "filed")
+  check("the untitled extra used its number",
+        File.file?("#{lib}/Movies/Roman Holiday (1953)/extras/Roman Holiday (1953) - t02.mkv"), true)
+
+  # Another disc claiming a path that is already taken by different bytes is a
+  # duplicate or a mis-identification. Either way it is never overwritten.
+  other_rip = "2026-08-09--roman-holiday-2--999888777666"
+  other_encoded = File.join(ENV["TRANSCODED_DIR"], other_rip)
+  FileUtils.mkdir_p(other_encoded)
+  File.write(File.join(other_encoded, "title_00.mkv"), "different bytes")
+  other = Disc.create!(fingerprint: "check-filing-#{SecureRandom.hex(6)}",
+                       rip_dir: "/srv/media/rips/#{other_rip}", status: "confirmed",
+                       confirmed_kind: "movie", confirmed_title: "Roman Holiday",
+                       confirmed_year: 1953)
+  other.disc_titles.create!(index: 0, duration_seconds: 7068, role: "feature")
+  clash = FileDisc.call(other.reload, notify: false)
+  check("an occupied path is a conflict", clash.conflicts.size, 1)
+  check("and the first file is untouched", File.read(feature), "bytes 0")
+
+  # A television disc with no episode numbers cannot be filed, and says so
+  # rather than inventing an order.
+  tv = Disc.create!(fingerprint: "check-filing-#{SecureRandom.hex(6)}",
+                    rip_dir: "/srv/media/rips/#{rip}", status: "confirmed",
+                    confirmed_kind: "series", confirmed_title: "Still Game")
+  tv.disc_titles.create!(index: 0, duration_seconds: 1748, role: "episode")
+  unnumbered = FileDisc.call(tv.reload, notify: false)
+  check("an unnumbered episode is skipped", unnumbered.skipped.size, 1)
+  check("and nothing is filed for it",      unnumbered.linked, [])
+
+  tv.disc_titles.find_by(index: 0).update!(season_number: 3, episode_number: 5, episode_title: "Doacters")
+  numbered = FileDisc.call(tv.reload, notify: false)
+  check("a numbered episode files",
+        File.file?("#{lib}/TV/Still Game/Season 03/Still Game - S03E05 - Doacters.mkv"), true)
+  check("and the series gets a tvshow.nfo", File.file?("#{lib}/TV/Still Game/tvshow.nfo"), true)
+  check("with one title filed",             numbered.linked.size, 1)
+
+  undone = UnfileDisc.call(tv.reload)
+  # The episode, its sidecar, and the tvshow.nfo that would otherwise leave an
+  # empty series on Jellyfin's front page.
+  check("undo removes the episode, sidecar and show nfo", undone.removed.size, 3)
+  check("and prunes the empty season",   Dir.exist?("#{lib}/TV/Still Game/Season 03"), false)
+  check("and the show folder with it",   Dir.exist?("#{lib}/TV/Still Game"), false)
+  check("the encoded file is untouched", File.file?(File.join(encoded, "title_00.mkv")), true)
+  check("and the disc is confirmed again", tv.reload.status, "confirmed")
+  check("with no placements left",       tv.disc_titles.filter_map(&:placement), [])
+
+  raise ActiveRecord::Rollback
+end
+
+FileUtils.remove_entry(root)
+
+puts
+puts $failures.zero? ? "all checks passed" : "#{$failures} FAILED"
+exit($failures.zero? ? 0 : 1)

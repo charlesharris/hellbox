@@ -1,0 +1,70 @@
+<%# The library, and the way back out of it.
+
+    Two lists and nothing else. What has been filed is here so it can be
+    unfiled, which is the only reason this screen is worth a click -- the
+    library itself is browsable in Jellyfin and does not need a second viewer.
+%>
+
+<header class="bar">
+  <h1><%= link_to "slay", root_path %> / library</h1>
+  <span class="muted"><%= @filed.size %> filed · <%= @ready.size %> waiting</span>
+</header>
+
+<% if @ready.any? %>
+  <section class="panel attention">
+    <h2>Confirmed, not yet filed <span class="count"><%= @ready.size %></span></h2>
+    <p class="muted">
+      A disc lands here when it has been confirmed but its titles were still
+      encoding. Filing again picks up whatever has finished since.
+    </p>
+    <ul class="rows">
+      <% @ready.each do |disc| %>
+        <li>
+          <span class="name"><%= link_to disc.display_name, review_path(disc) %></span>
+          <span class="detail">
+            <%= disc.confirmed_title.presence || "unnamed" %>
+            <%= "(#{disc.confirmed_year})" if disc.confirmed_year %>
+            · <%= disc.confirmed_kind == "series" ? "television" : "film" %>
+          </span>
+          <span class="pct">
+            <%= button_to "File", file_disc_path(disc), class: "primary small" %>
+          </span>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>
+
+<section class="panel">
+  <h2>In the library <span class="count"><%= @filed.size %></span></h2>
+  <% if @filed.empty? %>
+    <p class="muted">Nothing filed yet.</p>
+  <% else %>
+    <ul class="rows">
+      <% @filed.each do |disc| %>
+        <li class="stacked">
+          <div class="line">
+            <span class="name"><%= disc.confirmed_title.presence || disc.display_name %></span>
+            <span class="detail">
+              <%= disc.confirmed_year %>
+              · filed <%= disc.updated_at.strftime("%d %b %H:%M") %>
+            </span>
+            <span class="pct">
+              <%# Undo has to be one click. The thresholds that put a disc here
+                  will be wrong at first, and finding that out should be cheap. %>
+              <%= button_to "Undo", unfile_disc_path(disc), method: :delete,
+                    class: "small",
+                    data: { turbo_confirm: "Remove #{disc.confirmed_title.presence || disc.display_name} " \
+                                           "from the library? The encoded files stay where they are." } %>
+            </span>
+          </div>
+          <ul class="paths">
+            <% Array(@placements[disc.id]).sort_by(&:path).each do |placement| %>
+              <li><code><%= placement.path.delete_prefix(Library::Paths.library + "/") %></code></li>
+            <% end %>
+          </ul>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

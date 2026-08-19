@@ -1,0 +1,22 @@
+#!/bin/bash
+# Wait for Postgres, clear a stale pid, then run whatever was asked for.
+#
+# The stale pid matters more than it sounds: a bind-mounted Rails container that
+# is killed rather than stopped leaves tmp/pids/server.pid behind, and the next
+# start refuses with "a server is already running" against a process that does
+# not exist. It is the single most common way this container fails to come back.
+set -e
+
+rm -f /app/tmp/pids/server.pid
+
+if [ -n "$DATABASE_URL" ]; then
+  for i in $(seq 1 60); do
+    if bin/rails runner 'ActiveRecord::Base.connection' >/dev/null 2>&1; then
+      break
+    fi
+    [ "$i" = 60 ] && echo "database never became reachable at $DATABASE_URL" >&2
+    sleep 1
+  done
+fi
+
+exec "$@"

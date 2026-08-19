@@ -1,0 +1,30 @@
+# Build output. Anchored to the repository root: unanchored, "hellboxd" and
+# "slay" also match cmd/hellboxd/ and cmd/slay/, which silently excluded the
+# client's source from being committed at all.
+#
+# Anchoring then bit the other way round. /slay was written to catch a stray
+# binary from `go build ./cmd/slay` in the root, and it also matched slay/, the
+# Rails application -- which was silently excluded exactly as cmd/slay/ had
+# been. The negation below re-includes the directory while the rule still
+# catches the file.
+/bin/
+/dist/
+/hellboxd
+/slay
+!/slay/
+
+# local config and state
+*.db
+*.db-wal
+*.db-shm
+config.local.toml
+
+# editor / OS
+.DS_Store
+*.swp
+
+# Go
+/vendor/
+
+# local scratch
+resume-claude.lala

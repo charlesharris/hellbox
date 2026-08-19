@@ -1,0 +1,107 @@
+{
+  "id": 25,
+  "kind": "disc",
+  "at": "2026-08-09T11:47:10.954753359-05:00",
+  "data": {
+    "blocked": false,
+    "blocked_reason": "",
+    "disc_name": "The Karate Kid (Special Edition)",
+    "disc_type": "dvd",
+    "drive": "SDRW-08D2S-U",
+    "fingerprint": "31181d14abe3d67df786e78068ee91e300a2daf4c0e7851aa993d1be5d3c58c4",
+    "read_path": "native-dvd",
+    "rip_dir": "",
+    "stage": "enumerated",
+    "titles": [
+      {
+        "audio_count": 3,
+        "chapters": 28,
+        "duration_seconds": 7608,
+        "index": 0,
+        "source_file": "",
+        "subtitle_count": 8
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 119,
+        "index": 1,
+        "source_file": "",
+        "subtitle_count": 1
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 225,
+        "index": 2,
+        "source_file": "",
+        "subtitle_count": 0
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 782,
+        "index": 3,
+        "source_file": "",
+        "subtitle_count": 1
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 497,
+        "index": 4,
+        "source_file": "",
+        "subtitle_count": 1
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 600,
+        "index": 5,
+        "source_file": "",
+        "subtitle_count": 2
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 1439,
+        "index": 6,
+        "source_file": "",
+        "subtitle_count": 1
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 1284,
+        "index": 7,
+        "source_file": "",
+        "subtitle_count": 1
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 126,
+        "index": 8,
+        "source_file": "",
+        "subtitle_count": 0
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 88,
+        "index": 9,
+        "source_file": "",
+        "subtitle_count": 0
+      },
+      {
+        "audio_count": 1,
+        "chapters": 2,
+        "duration_seconds": 64,
+        "index": 10,
+        "source_file": "",
+        "subtitle_count": 0
+      }
+    ],
+    "volume_label": "DVD_VIDEO"
+  }
+}

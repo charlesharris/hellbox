@@ -1,0 +1,70 @@
+# slay — the web client — and its database.
+#
+# hellboxd is deliberately not here. It needs /dev/sr*, /dev/dri and SG_IO
+# ioctls, and containerising it would reintroduce exactly the device
+# passthrough and group-id problems that motivated leaving ARM. It runs on the
+# host under systemd; this stack talks to it over loopback.
+#
+# Jellyfin is also not here. It has its own stack in ~/media-box-rebuilt and
+# only needs to read library_dir, which both write to.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # Host networking so slay reaches Postgres and hellboxd at the same
+    # 127.0.0.1 it would use outside a container. On a single-user appliance
+    # with no authentication anywhere, a bridge network would buy isolation
+    # from nothing and cost a hostname indirection.
+    network_mode: host
+    environment:
+      POSTGRES_USER: slay
+      POSTGRES_PASSWORD: slay
+      POSTGRES_DB: slay_development
+      PGPORT: "5433" # not 5432, in case a host Postgres ever appears
+    volumes:
+      - slay-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slay -p 5433"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  slay:
+    build:
+      context: ./slay
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RAILS_ENV: development
+      DATABASE_URL: postgres://slay:slay@127.0.0.1:5433/slay_development
+      # Where hellboxd listens. Loopback works because of network_mode: host.
+      HELLBOXD_URL: http://127.0.0.1:9494
+      # Rails must see the media trees at the same paths hellboxd reports, or
+      # every path in the catalog would need translating.
+      RIPS_DIR: /srv/media/rips
+      TRANSCODED_DIR: /srv/media/transcoded
+      LIBRARY_DIR: /srv/media/library
+      # Jellyfin is told to rescan after a filing run. Both unset means it is
+      # not told, which is only a delay: the files are filed either way and
+      # Jellyfin finds them on its own schedule. An API key comes from its
+      # dashboard, under Administration -> API Keys.
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+    volumes:
+      - ./slay:/app
+      - slay-bundle:/usr/local/bundle
+      # One mount rather than three. Filing is by hardlink, which requires
+      # source and destination on the same filesystem *and* inside the same
+      # mount as the container sees it — three separate binds of subdirectories
+      # would make every link fail with EXDEV.
+      - /srv/media:/srv/media
+    command: bin/rails server -b 0.0.0.0 -p 3000
+
+volumes:
+  slay-db:
+  slay-bundle:

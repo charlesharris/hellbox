@@ -1,0 +1,85 @@
+#!/usr/bin/env ruby
+# Files everything that is confirmed and not yet in the library.
+#
+# This exists because filing and encoding finish at different times. A disc is
+# confirmed the moment a person names it, but its titles are still going
+# through the encoder for some minutes after -- so the filing run at
+# confirmation time files what is ready and leaves the rest. This is what comes
+# back for the rest.
+#
+# It also repairs the other direction: a disc recorded as filed whose links
+# have gone from the library (a share remounted empty, a tidy-up gone wrong) is
+# relinked from the encoded tree, because the encoded tree is the thing that
+# holds the bytes and the library is only ever a view onto it.
+#
+#   bin/file-pending            file once and exit
+#   bin/file-pending --every 60 keep filing, every 60 seconds
+require_relative "../config/environment"
+
+interval = nil
+if (i = ARGV.index("--every"))
+  interval = ARGV[i + 1].to_i
+  abort("--every wants a number of seconds") unless interval.positive?
+end
+
+log = ->(msg) { $stdout.puts("#{Time.current.strftime('%H:%M:%S')} file    #{msg}"); $stdout.flush }
+
+def repair(log)
+  # A placement whose file has gone is a placement that is no longer true. It
+  # is dropped rather than trusted, which puts its disc back in front of the
+  # ordinary filing path below.
+  Placement.find_each do |placement|
+    next if File.file?(placement.path)
+    log.("relinking: #{placement.path} has gone")
+    disc = placement.disc_title.disc
+    placement.destroy!
+    disc.update!(status: "confirmed") if disc.status == "filed"
+  end
+end
+
+def sweep(log)
+  filed = 0
+  waiting = 0
+
+  Disc.where(status: "confirmed").find_each do |disc|
+    result = FileDisc.call(disc, notify: false)
+    filed += result.linked.size
+
+    # A disc with nothing but unencoded titles is the ordinary case between a
+    # confirmation and the encoder catching up, and saying so once per disc per
+    # sweep would bury the runs that did something.
+    if result.linked.empty? && result.conflicts.empty? && result.skipped.empty?
+      waiting += 1
+      next
+    end
+
+    log.("#{disc.display_name}: #{result.summary}")
+    result.conflicts.each { |_title, why| log.("  !! #{why}") }
+    result.skipped.each { |title, why| log.("  -- t#{format('%02d', title.index)}: #{why}") }
+  end
+
+  # But a sweep that says nothing at all is indistinguishable from one that did
+  # not run, so it always accounts for itself in one line.
+  log.("nothing to file; #{waiting} disc(s) waiting on encoded files") if filed.zero? && waiting.positive?
+  log.("nothing to file") if filed.zero? && waiting.zero?
+  filed
+end
+
+loop do
+  begin
+    repair(log)
+    linked = sweep(log)
+    # One rescan for the whole sweep rather than one per disc: filing six discs
+    # of a box set should not ask Jellyfin to scan six times.
+    Jellyfin.notify if linked.positive?
+  rescue FileDisc::CrossDevice => e
+    log.("!! #{e.message}")
+  rescue StandardError => e
+    # A sweep that dies takes every later disc with it, and the next run would
+    # hit the same disc again. Reported and carried past.
+    log.("!! sweep failed (#{e.class}: #{e.message})")
+  end
+
+  break if interval.nil?
+  sleep interval
+end

@@ -1,0 +1,91 @@
+<%# Three states: needs you, working, done. An empty first box means close the
+    tab. Since there are no notifications anywhere, this page is the only
+    signal, so the count has to be unmissable and correct. %>
+
+<header class="bar">
+  <h1>slay</h1>
+  <span class="muted">
+    <%= @daemon_up ? "hellboxd connected" : "hellboxd unreachable" %>
+  </span>
+</header>
+
+<% unless @daemon_up %>
+  <section class="panel danger">
+    <h2>hellboxd is not answering</h2>
+    <p><%= @daemon_error %></p>
+    <p class="muted">
+      Discs already ripped are safe and still described on disk — the rips tree
+      does not depend on this. Nothing new will be read until the daemon is back.
+    </p>
+  </section>
+<% end %>
+
+<section class="panel <%= @needs_you.any? ? "attention" : "" %>">
+  <h2>Needs you <span class="count"><%= @needs_you.size %></span></h2>
+  <% if @needs_you.empty? %>
+    <p class="muted">Nothing. Close the tab.</p>
+  <% else %>
+    <ul class="rows">
+      <% @needs_you.each do |item| %>
+        <li>
+          <span class="name"><%= item[:title] %></span>
+          <span class="detail"><%= item[:detail] %></span>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>
+
+<section class="panel">
+  <h2>Working</h2>
+  <% if @working.empty? %>
+    <p class="muted">Idle. Put a disc in.</p>
+  <% else %>
+    <ul class="rows">
+      <% @working.each do |d| %>
+        <li>
+          <span class="name"><%= d["label"].presence || d["device_path"] %></span>
+          <span class="detail">
+            <%= d["disc_label"].presence || d["state"] %>
+            <% if d["title_index"] && d["title_count"] %>
+              · title <%= d["title_index"].to_i + 1 %> of <%= d["title_count"] %>
+            <% end %>
+          </span>
+          <% if d["progress"] %>
+            <span class="pct"><%= (d["progress"].to_f * 100).round %>%</span>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>
+
+<section class="panel">
+  <h2>Done today <%= link_to "library", filings_path, class: "muted" %></h2>
+  <% if @done_today.empty? %>
+    <p class="muted">Nothing filed today.</p>
+  <% else %>
+    <ul class="rows">
+      <% @done_today.each do |disc| %>
+        <li>
+          <span class="name"><%= disc.display_name %></span>
+          <span class="detail">filed <%= disc.updated_at.strftime("%H:%M") %></span>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>
+
+<% if @health.any? %>
+  <section class="panel">
+    <h2>Health</h2>
+    <ul class="rows">
+      <% @health.each do |h| %>
+        <li>
+          <span class="name"><%= h["ok"] ? "ok" : "!!" %> <%= h["name"] %></span>
+          <span class="detail"><%= h["detail"] %></span>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>

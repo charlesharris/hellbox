@@ -1,0 +1,121 @@
+#!/usr/bin/env ruby
+# Checks the identification nets against the discs this collection actually
+# contains. Rails was generated --skip-test, so this is a runnable script
+# rather than a spec; it exits non-zero on failure and is meant for CI or a
+# quick sanity pass after changing a net.
+require_relative "../config/environment"
+
+$failures = 0
+def check(what, got, want)
+  ok = got == want
+  $failures += 1 unless ok
+  puts format("%-4s %-46s %s", ok ? "ok" : "FAIL", what, ok ? got.inspect : "got #{got.inspect}, want #{want.inspect}")
+end
+
+# A disc built in memory; nothing is persisted.
+Fake = Struct.new(:volume_label, :disc_name, :disc_type, :disc_titles, keyword_init: true)
+Title = Struct.new(:duration_seconds)
+def fake(label: nil, name: nil, type: "dvd", secs: [])
+  Fake.new(volume_label: label, disc_name: name, disc_type: type,
+           disc_titles: secs.map { |s| Title.new(s) })
+end
+
+label = Identify::LabelNet.new
+dname = Identify::DiscNameNet.new
+shape = Identify::ShapeNet.new
+first = ->(net, d) { net.identify(d).first }
+
+puts "-- LabelNet, on labels from this shelf --"
+check("ROMAN_HOLIDAY",       first.(label, fake(label: "ROMAN_HOLIDAY"))&.title, "Roman Holiday")
+check("SPACEBALLS_LB drops the letterbox marker",
+                             first.(label, fake(label: "SPACEBALLS_LB"))&.title, "Spaceballs")
+check("STILL_GAME_S3D2 season", first.(label, fake(label: "STILL_GAME_S3D2"))&.season, 3)
+check("STILL_GAME_S3D2 disc",   first.(label, fake(label: "STILL_GAME_S3D2"))&.disc_number, 2)
+check("Earthsea kept as typed", first.(label, fake(label: "Earthsea"))&.title, "Earthsea")
+check("DVD_VIDEO abstains",     label.identify(fake(label: "DVD_VIDEO")), [])
+# STNG must stay weak: a confident wrong expansion cannot be overruled.
+stng = first.(label, fake(label: "STNGD3"))
+check("STNGD3 is marked an abbreviation", stng.confidence < 0.2, true)
+
+puts "-- DiscNameNet, on names read off real discs --"
+kk = first.(dname, fake(label: "DVD_VIDEO", name: "The Karate Kid (Special Edition)"))
+check("edition dropped",       kk&.title, "The Karate Kid")
+check("beats a label",         kk.confidence > 0.7, true)
+ff = first.(dname, fake(label: "FIREFLYUS_D1", name: "FIREFLY: DISC 1", type: "bluray"))
+check("FIREFLY: DISC 1 title", ff&.title, "Firefly")
+check("FIREFLY: DISC 1 disc",  ff&.disc_number, 1)
+check("mixed case survives",   first.(dname, fake(name: "eXistenZ"))&.title, "eXistenZ")
+check("unknown parenthetical kept",
+      first.(dname, fake(name: "Fanny (Hill)"))&.title, "Fanny (Hill)")
+
+puts "-- ShapeNet, on real disc shapes --"
+# The Karate Kid: one feature against ten extras.
+kk_secs = [7608, 119, 225, 782, 497, 600, 1439, 1284, 126, 88, 64]
+check("Karate Kid is a film", shape.classify(kk_secs.sort.reverse), "movie")
+# Firefly disc 1: an 87-minute pilot against three 43-minute episodes. The
+# ratio test alone calls this a film by a 1.3% margin; the remainder test saves
+# it. This is the case the Go fix was written for.
+ff_secs = [5202, 2638, 2634, 2563, 1719]
+check("Firefly disc 1 is television", shape.classify(ff_secs), "series")
+
+puts "-- Resolver --"
+props = [
+  Identify::CandidateProposal.new(net: "discname", title: "The Karate Kid", confidence: 0.8, why: "x"),
+  Identify::CandidateProposal.new(net: "label",    title: "Karate Kid",     confidence: 0.5, why: "y")
+]
+r = Identify::Resolver.call(props)
+check("different titles do not merge", r.all.size, 2)
+agree = [
+  Identify::CandidateProposal.new(net: "discname", title: "Roman Holiday", confidence: 0.6, why: "x"),
+  Identify::CandidateProposal.new(net: "label",    title: "ROMAN_HOLIDAY", confidence: 0.5, why: "y")
+]
+ra = Identify::Resolver.call(agree)
+check("agreeing nets merge",           ra.all.size, 1)
+check("agreement raises confidence",   ra.best.confidence > 0.6, true)
+
+# The winner is routinely the net that read the title off the disc, not the one
+# that looked it up -- so the id has to survive the merge, or the NFO loses the
+# only field that stops Jellyfin re-matching the file by its name.
+carried = Identify::Resolver.call([
+  Identify::CandidateProposal.new(net: "discname", title: "Roman Holiday", confidence: 0.9, why: "x"),
+  Identify::CandidateProposal.new(net: "provider", title: "Roman Holiday", confidence: 0.85,
+                                  year: 1953, provider: "tmdb", provider_id: "804", why: "y")
+])
+check("the leader keeps the provider id", carried.best.provider_id, "804")
+check("and the provider's year",          carried.best.year, 1953)
+
+puts "-- ProviderNet, against a stubbed TMDB --"
+# A stub rather than the real API: the logic worth testing is how a match is
+# judged, and that must be checkable with no key and no network.
+class StubTmdb
+  def initialize(movies) = (@movies = movies)
+  def configured? = true
+  def search_movie(_t, year: nil) = @movies
+  def search_series(_t, year: nil) = []
+end
+
+kk_disc = fake(name: "The Karate Kid", secs: [7608, 119, 225])
+props   = [Identify::CandidateProposal.new(net: "discname", title: "The Karate Kid", confidence: 0.8)]
+
+# 7608s on the disc against a 126-minute listing: agrees within ~1%.
+right = StubTmdb.new([{ provider: "tmdb", provider_id: "9607", title: "The Karate Kid",
+                        year: 1984, runtime_seconds: 126 * 60 }])
+c = Identify::ProviderNet.new(client: right).identify(kk_disc, props).first
+check("runtime agreement raises confidence", c.confidence > 0.8, true)
+check("provider proposes the year",          c.year, 1984)
+check("why names the tmdb id",               c.why.include?("tmdb:9607"), true)
+
+# The 2010 remake: same title, 140 minutes. Must be demoted, not accepted.
+wrong = StubTmdb.new([{ provider: "tmdb", provider_id: "38575", title: "The Karate Kid",
+                        year: 2010, runtime_seconds: 140 * 60 }])
+w = Identify::ProviderNet.new(client: wrong).identify(kk_disc, props).first
+check("runtime disagreement demotes it",     w.confidence < 0.5, true)
+check("but it is still reported",            w.title, "The Karate Kid")
+
+# No key at all is an ordinary answer, not a failure.
+class NoKey; def configured? = false; end
+check("unconfigured provider abstains",
+      Identify::ProviderNet.new(client: NoKey.new).identify(kk_disc, props), [])
+
+puts(($failures.zero? ? "\nall checks passed" : "\n#{$failures} FAILED"))
+exit($failures.zero? ? 0 : 1)

@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+# The bridge: hellboxd's event stream into the catalog.
+#
+# One long-lived process. It is the only thing that writes disc facts, so there
+# is no second writer to race with, and it is restartable at any moment because
+# the cursor is only advanced after an event has been applied.
+#
+#   bin/bridge
+require_relative "../config/environment"
+require "hellboxd/stream"
+
+log = ->(msg) { $stdout.puts("#{Time.current.strftime('%H:%M:%S')} bridge  #{msg}"); $stdout.flush }
+
+cursor = BridgeCursor.for
+log.("starting from event #{cursor.last_event_id}")
+
+loop do
+  begin
+    Hellboxd::Stream.new.each(from_id: cursor.last_event_id) do |frame|
+      kind = frame["kind"]
+      body = frame["body"]
+
+      case kind
+      when "hello"
+        log.("connected; daemon is at event #{body['last_event_id']}")
+        next
+      when "reconcile"
+        # The daemon could not replay from our cursor: it has been away longer
+        # than the ring buffer holds. Continuing would leave an undetectable
+        # gap, so say so loudly. A filesystem reconcile is the correct repair
+        # and is not yet built; until it is, this is the honest failure.
+        log.("!! MISSED EVENTS -- #{body['reason']}. The catalog may be behind " \
+             "the filesystem. A reconcile pass is needed; none exists yet.")
+        cursor.advance!(body["last_event_id"])
+        next
+      end
+
+      # Applied first, cursor advanced second. A crash between the two replays
+      # the event, which is harmless; the other order would lose it.
+      begin
+        result = Ingest.call(body)
+        if kind == "disc" && result
+          log.("#{body.dig('data', 'stage')}: #{result.display_name} " \
+               "(#{result.disc_titles.count} titles)")
+        end
+      rescue StandardError => e
+        # One bad event must not stop the stream. It is recorded and skipped;
+        # the alternative is a bridge that dies on the first surprise and takes
+        # every later event with it.
+        log.("!! could not apply event #{frame['id']} (#{kind}): #{e.class}: #{e.message}")
+      end
+
+      cursor.advance!(frame["id"]) if frame["id"]
+    end
+    log.("stream ended; reconnecting in 3s")
+  rescue StandardError => e
+    log.("stream error (#{e.class}: #{e.message}); reconnecting in 3s")
+  end
+  sleep 3
+end

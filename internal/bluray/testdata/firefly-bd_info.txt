@@ -1,0 +1,44 @@
+Using libbluray version 1.4.1
+Volume Identifier   : FIREFLYUS_D1
+BluRay detected     : yes
+First Play supported: no
+Top menu supported  : yes
+HDMV titles         : 46
+BD-J titles         : 35
+UNSUPPORTED titles  : 35
+
+BD-J detected       : yes
+Java VM found       : no
+BD-J handled        : no
+BD-J organization ID: 7fff504c
+BD-J disc ID        : 00000000000000000000000000000008
+
+AACS detected       : yes
+libaacs detected    : yes
+Disc ID             : B0D76EF00DE4D8C949340F0D21E9AABB2ED9AC4F
+AACS MKB version    : 9
+AACS handled        : yes
+
+BD+ detected        : yes
+libbdplus detected  : yes
+BD+ handled         : no
+
+Application info:
+  initial mode preference : 2D
+  3D content exists       : No
+  video format            : ignored (0x0)
+  frame rate              : ignored (0x0)
+  initial dynamic range   : SDR (0x0)
+  provider data           : '                                '
+
+Disc library metadata:
+Metadata file       : bdmt_eng.xml
+Language            : eng
+Disc name           : FIREFLY: DISC 1
+Alternative         : <undefined>
+Disc #              : 1/1
+TOC count           : 1
+	Title 1: FIREFLY: DISC 1
+Thumbnail count     : 2
+	Firefly_metadata_640.jpg 	
+	Firefly_metadata_640.jpg 	

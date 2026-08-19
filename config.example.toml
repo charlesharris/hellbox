@@ -1,0 +1,307 @@
+# hellbox configuration.
+#
+# Every value below is a default; the file only needs to contain what differs.
+# A missing config file is not an error — hellboxd runs on these defaults.
+
+rips_dir    = "/srv/media/rips"
+work_dir    = "/srv/media/work"
+library_dir = "/srv/media/library"
+
+# Where transcoded files land. Separate from library_dir because naming them for
+# Jellyfin needs the identification Phase 3 does; until then they carry the same
+# disc-derived names as the rips they came from.
+transcoded_dir = "/srv/media/transcoded"
+
+state_path  = "/var/lib/hellbox/state.db"
+socket_path = "/run/hellbox/hellbox.sock"
+
+# Where the JSON API and the event stream listen.
+#
+# Loopback only, and deliberately so: nothing here authenticates anything, so
+# the bind address is the entire boundary between this and the network. Set it
+# to "" to turn the HTTP API off and leave only the unix socket.
+http_addr = "127.0.0.1:9494"
+
+# Titles shorter than this are not ripped. It excludes menu loops and stills
+# while keeping anything that could be an episode or a featurette.
+#
+# Changing this changes which titles MakeMKV enumerates, and title numbers are
+# assigned within that filtered list — so a disc scanned under one value and
+# ripped under another would rip the wrong titles. hellbox always uses this same
+# value for both.
+min_title_seconds = 60
+
+# Output below this size is treated as a failed rip rather than a short title.
+min_output_bytes = 10485760
+
+# Automatic retries before a disc is given up on and retained for inspection.
+max_rip_attempts = 2
+
+# How many times a disc is scanned before the drive gives up on it.
+#
+# A drive reports its disc ready over SCSI before MakeMKV can necessarily open
+# it, so the first scan after insertion can fail on a disc that reads perfectly
+# a few seconds later. max_rip_attempts cannot cover this: it is counted per
+# disc, and until a scan succeeds there is no disc to count against.
+#
+# Set this to 1 to fail on the first scan error.
+scan_attempts = 3
+
+# The pause between scan attempts — long enough for a disc that was still
+# spinning up to have settled. Unused when scan_attempts is 1.
+scan_retry_delay = "15s"
+
+# How long a single scan attempt may take before it is stopped and retried.
+#
+# A scan is bounded work, so unlike a rip it can be given a deadline rather than
+# a progress watchdog. It needs one: a scan that hangs hangs forever, and because
+# the attempt never returns, the retries never come round either.
+#
+# This is deliberately far above what a scan should take. Most finish inside a
+# minute, but one here took fourteen and a half — reading nothing for minutes at
+# a stretch, on a drive that cannot decrypt the disc and is retrying its way
+# through — and still succeeded. A deadline that stops work which would have
+# finished is worse than the hang it guards against.
+#
+# Set to "0" to wait indefinitely.
+scan_timeout = "45m"
+
+# Allow a disc the drive cannot decrypt to be copied to disk and decrypted
+# there, then ripped from the copy.
+#
+# An RPC-2 drive with no region set will not authenticate CSS, which leaves a
+# disc that scans perfectly and then hangs during the rip. libdvdcss does not
+# need that authentication — when the drive refuses to hand over a title key it
+# derives the key from the disc's own data — so dvdbackup can produce a
+# decrypted copy that MakeMKV reads normally.
+#
+# hellbox checks the drive's region and the disc's protection before every rip
+# and only takes this path when the drive genuinely cannot read the disc. It
+# needs dvdbackup installed and enough work_dir space for a whole disc, and adds
+# roughly half an hour per disc.
+#
+# A copy is kept if the rip that follows fails, and reused by the next attempt
+# rather than decrypting the same disc again. It is removed once the rip
+# succeeds, so work_dir holds copies only for discs that have not yet been
+# ripped — but a disc that keeps failing keeps its copy until it is dealt with.
+#
+# The alternative is setting the drive's region, which is faster but permanent:
+# a drive allows about five changes and then locks to the last one.
+decrypt_fallback = true
+
+# The dvdbackup executable. Empty finds it on PATH.
+# dvdbackup_bin = "dvdbackup"
+
+# How long a title may make no progress before the rip is stopped and the disc
+# failed.
+#
+# MakeMKV does not always fail a rip it cannot finish. On a disc the drive will
+# not decrypt — an RPC-2 drive with no region set, most often — it retries
+# internally, emitting messages while reading nothing, and waits forever. One
+# such rip sat for seventeen hours before this existed.
+#
+# Progress means MakeMKV's own progress values changing, not output arriving: a
+# stalled rip keeps talking. Set to "0" to wait indefinitely instead.
+rip_stall_timeout = "10m"
+
+# Turn a verified rip into a library file. Off leaves the rips and does nothing
+# else.
+#
+# Transcoding runs in the daemon rather than in a drive's worker, so the tray
+# opens and the next disc can go in while the previous one is still encoding.
+# One title at a time: there is a single GPU, and a second concurrent encode
+# would make each take twice as long rather than adding throughput.
+transcode = true
+
+# The encoder's quality parameter — qp for VAAPI, crf for software. Lower is
+# better; both run 0 (lossless) to 51.
+#
+# Measured on this hardware against a real DVD: 20 gives SSIM 0.978, and the
+# returns above it are poor — 18 costs another 500 MB per film for 0.0017 SSIM.
+# A two-hour film came out at 1.78 GB from a 5.4 GB rip, audio and subtitles
+# copied rather than re-encoded.
+transcode_quality = 20
+
+# A ceiling on the output bitrate, in kbps. 0 encodes at constant quality with
+# no ceiling.
+#
+# The quality parameter above is a quantizer, not a size target, and what it
+# costs depends entirely on the source. Measured here on two real discs at
+# quality 20: a clean 1953 film encoded at 1.36 Mb/s — nowhere near this cap, so
+# untouched — while a noisy 2002 television episode came out *larger than its
+# own source*, faithfully preserving broadcast noise, at 1976 MB an episode. The
+# same episode under this ceiling is 430 MB.
+#
+# The cap only engages on material that would otherwise balloon, so one setting
+# serves both without hellbox needing to know what it is looking at.
+transcode_max_kbps = 6000
+
+# The render node used for hardware encoding.
+#
+# "auto" uses /dev/dri/renderD128 when it exists and falls back to software when
+# it does not, so one configuration works on a machine with a GPU and one
+# without. Empty forces software. A path names a specific device.
+#
+# Hardware encoding is roughly five times faster here for output within 0.0013
+# SSIM of software, so the fallback is a real cost — `hellboxd -check` reports
+# which one is in use, and says so plainly when the GPU cannot be initialised.
+vaapi_device = "auto"
+
+# Interlaced sources are deinterlaced automatically, to one frame per field so
+# the full 50 or 60 Hz motion of the original is kept. It is detected from the
+# file rather than configured: it is a property of the disc, not a preference.
+# Progressive sources are never filtered — deinterlacing them halves their
+# detail.
+
+# Cap the output height, preserving aspect ratio. 0 keeps whatever the source
+# is, which is the default.
+#
+# Only ever downwards, so standard-definition discs are never touched — the
+# stack this replaces upscaled 576p television to 720p and made it both larger
+# and worse. Set this to 720 to shrink Blu-ray at the cost of resolution;
+# leaving it at 0 spends the budget on pixels instead, which is the better trade
+# while there are bits to spare.
+transcode_max_height = 0
+
+# Which audio and subtitle tracks are kept.
+#
+# One audio track survives: the disc's own default, or the first in this
+# language, or simply the first. A Blu-ray carries several at three to four
+# megabits each, which together cost more than the video.
+#
+# A language that matches nothing is ignored rather than obeyed. Many discs tag
+# no language at all, and a filter that removed every track from an untagged
+# disc would produce a silent film and call it a success.
+preferred_language = "eng"
+
+# Bitrate for audio that has to be re-encoded, in kbps.
+#
+# Only lossless tracks are re-encoded. A TrueHD or DTS-HD Master Audio track
+# runs 3000-4500 kbps — more than the whole video budget for a film — while AC3
+# at this bitrate is indistinguishable for the purpose and a seventh the size.
+# Anything already compact, including every DVD's AC3, is copied untouched.
+audio_kbps = 640
+
+# libx264's speed/efficiency tradeoff, used only when encoding in software.
+# VAAPI has no equivalent and ignores it.
+software_preset = "medium"
+
+# The ffmpeg executable. Empty finds it on PATH.
+# ffmpeg_bin = "ffmpeg"
+
+# Hardlink finished transcodes into library_dir, where Jellyfin reads them.
+#
+# OFF, because slay files the library now, and library_dir must have exactly
+# one writer. This path names a film from the disc's shape alone, so it would
+# file "Roman Holiday" alongside slay's "Roman Holiday (1953)" and Jellyfin
+# would show the same film twice.
+#
+# It is kept because it is the entire library with Rails switched off. A
+# hellboxd that rips, encodes and files with no database, no container and no
+# browser is worth being able to fall back to — turn this on when nothing else
+# is writing library_dir, and leave it off when slay is running.
+#
+# What it produces, for comparison with what slay produces:
+#
+#   Movies/Roman Holiday/Roman Holiday.mkv          the longest title
+#   Movies/Roman Holiday/extras/Roman Holiday - t01.mkv
+#   TV/Still Game/Still Game - c887d54d5276 - t00.mkv
+#
+# Identification is left to Jellyfin, which matches names against real metadata
+# providers. hellbox only produces names Jellyfin can match, plus the one thing
+# Jellyfin cannot know — which disc a file came from. Episodes are filed
+# unnumbered, because a disc does not carry episode numbers: every disc of a
+# series is typically labelled the same, with nothing to say which is which.
+# Rename them in Jellyfin; the fingerprint in each name traces it back to the
+# rip it came from. A file already in place is never replaced.
+file_to_library = false
+
+# An open tray means the disc is done and safe to reshelve.
+eject_on_success = true
+
+# A failed disc stays in its drive with the tray closed. Ejecting on failure
+# would hand back a disc that did not rip, indistinguishable from one that did.
+# Set this to true only if you would rather clear the drive than preserve that
+# distinction.
+eject_on_failure = false
+
+# How often each drive is polled for a disc.
+poll_interval = "2s"
+
+# Read DVDs with libdvdread and libdvdcss under ffmpeg instead of MakeMKV.
+#
+# No registration key, nothing that expires, chapters preserved, and region
+# free. Measured against MakeMKV on the same title in the same drive: durations
+# agreed to 0.03 seconds, chapters and audio were identical, and the native
+# output kept one more subtitle track. MakeMKV still tags subtitle languages
+# better -- it labelled one track "chi" where this leaves it untagged.
+#
+# It also stops a region-blocked disc paying for a decrypt copy it does not
+# need. libdvdcss derives a title key from the disc when the drive refuses to,
+# so the disc is read in place and the half hour dvdbackup used to cost is not
+# spent. The copy remains for discs that genuinely fail.
+#
+# On by default as of 2026-08-09, after a full disc went through it: eleven
+# titles, every one verified against the duration the disc claimed, no MakeMKV
+# involved at any point.
+#
+# One consequence, accepted deliberately rather than worked around. Native
+# enumeration reports no per-title byte sizes, and the disc fingerprint is
+# built from durations *and* sizes, so a disc ripped under MakeMKV fingerprints
+# differently here. Reinsert one and it will be ripped again rather than
+# recognised. Nothing is lost -- the rips tree describes itself and the old rip
+# stays where it is -- but the time is spent again.
+#
+# Set this to false to go back to MakeMKV, which is still there and still works.
+native_dvd = true
+
+# Ask the demuxer for exact chapter marks, at the cost of reading each title
+# twice. Chapters arrive without it; measured, it moved a single mark by 124ms,
+# which is a poor trade against doubling the read of a two hour feature.
+dvd_preindex = false
+
+# Leave empty to find makemkvcon on PATH.
+makemkv_bin = "makemkvcon"
+
+# MakeMKV will not run at all without a valid registration key — "free for DVD"
+# describes which discs may be converted, not whether the program starts. The
+# free beta key expires roughly monthly, so an appliance nobody is watching
+# would otherwise stop ripping every few weeks with an error that looks like a
+# disc fault.
+#
+# With this set, a health check that finds the key expired or missing fetches
+# the currently published key and installs it. It is never fetched
+# speculatively, only after the key in place has already been found bad. If the
+# published key is the same one that just expired, that is reported as a warning
+# rather than passed off as a fix — MakeMKV has simply not issued a new one yet.
+#
+# Set this to false to manage the key by hand.
+auto_refresh_key = true
+
+# The shortest gap between two refresh attempts, so an expired key with no
+# replacement published does not mean a request every health check.
+key_refresh_interval = "6h"
+
+# Where makemkvcon keeps its registration key. Empty means the home directory of
+# the user hellboxd runs as, which is where MakeMKV puts it by default.
+#
+# makemkv_settings_path = "/home/charris/.MakeMKV/settings.conf"
+
+# Where the published beta key is read from. Empty means the address built into
+# the binary; override it only if the forum layout or address changes.
+#
+# beta_key_url = "https://forum.makemkv.com/forum/viewtopic.php?t=1053"
+
+# Drives are discovered automatically. These blocks are optional and exist only
+# to give a drive a friendly name or to stop hellbox using it.
+#
+# Find the stable id with: hellboxd -check
+#
+# The id is the /dev/disk/by-id basename, not /dev/srN. Device numbering is not
+# stable: the machine's only optical drive currently enumerates as /dev/sr1, and
+# nothing stops the kernel calling it /dev/sr0 after a reboot.
+#
+# [[drives]]
+# stable_id = "usb-HL-DT-ST_BD-RE_BT10N_DD564198838A4-0:0"
+# label     = "bd"
+# disabled  = false

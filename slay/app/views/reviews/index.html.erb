@@ -1,0 +1,44 @@
+<header class="bar">
+  <h1><%= link_to "slay", root_path %> / review</h1>
+  <span class="muted"><%= @discs.size %> waiting</span>
+</header>
+
+<% if @discs.empty? && @blocked.empty? %>
+  <section class="panel"><p class="muted">Nothing to review.</p></section>
+<% end %>
+
+<% if @discs.any? %>
+  <section class="panel attention">
+    <h2>Needs a decision <span class="count"><%= @discs.size %></span></h2>
+    <ul class="rows">
+      <% @discs.each do |disc| %>
+        <% best = disc.candidates.max_by(&:confidence) %>
+        <li>
+          <span class="name"><%= link_to disc.display_name, review_path(disc) %></span>
+          <span class="detail">
+            <%= disc.disc_titles.size %> titles ·
+            <%= best ? "#{best.net} suggests #{best.title.inspect} (#{best.confidence_pct}%)" : "nothing proposed" %>
+          </span>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>
+
+<% if @blocked.any? %>
+  <section class="panel">
+    <h2>Catalogued but unreadable <span class="count"><%= @blocked.size %></span></h2>
+    <p class="muted">
+      These enumerated fine and cannot be ripped. They are described in full
+      because enumeration needs no key — only the payload is out of reach.
+    </p>
+    <ul class="rows">
+      <% @blocked.each do |disc| %>
+        <li>
+          <span class="name"><%= link_to disc.display_name, review_path(disc) %></span>
+          <span class="detail"><%= disc.disc_titles.size %> titles · <%= disc.blocked_reason %></span>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>

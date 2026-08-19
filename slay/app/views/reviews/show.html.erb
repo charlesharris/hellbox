@@ -1,0 +1,117 @@
+<header class="bar">
+  <h1><%= link_to "slay", root_path %> / <%= link_to "review", reviews_path %></h1>
+  <span class="muted"><%= @disc.status %></span>
+</header>
+
+<% if flash[:alert] %><section class="panel danger"><p><%= flash[:alert] %></p></section><% end %>
+
+<section class="panel">
+  <h2><%= @disc.display_name %></h2>
+  <ul class="rows">
+    <li><span class="name">volume label</span><span class="detail"><%= @disc.volume_label.presence || "—" %></span></li>
+    <li><span class="name">disc says</span><span class="detail"><%= @disc.disc_name.presence || "nothing" %></span></li>
+    <li><span class="name">read by</span><span class="detail"><%= @disc.read_path %><%= " · #{@disc.blocked_reason}" if @disc.blocked? %></span></li>
+    <li><span class="name">fingerprint</span><span class="detail"><%= @disc.fingerprint.first(12) %></span></li>
+  </ul>
+</section>
+
+<%# The evidence, with each net's reasoning. A number with no argument behind it
+    cannot be disagreed with, which is the whole point of keeping Why. %>
+<section class="panel">
+  <h2>What the nets proposed</h2>
+  <% if @disc.candidates.empty? %>
+    <p class="muted">Nothing. The label said nothing usable and the disc gave no name.</p>
+  <% else %>
+    <ul class="rows">
+      <% @disc.candidates.order(confidence: :desc).each do |c| %>
+        <li>
+          <span class="name"><%= c.net %></span>
+          <span class="detail">
+            <strong><%= c.title.presence || "(kind only)" %></strong>
+            <%= "· #{c.year}" if c.year %>
+            <%= "· #{c.kind}" if c.kind %>
+            <%= "· season #{c.season}" if c.season %>
+            <%= "· disc #{c.disc_number}" if c.disc_number %>
+            — <%= c.why %>
+          </span>
+          <span class="pct"><%= c.confidence_pct %>%</span>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>
+
+<%= form_with url: review_path(@disc), method: :patch, local: true do %>
+  <section class="panel attention">
+    <h2>Decide</h2>
+    <div class="grid">
+      <label>Title
+        <%= text_field_tag :confirmed_title,
+              @disc.confirmed_title.presence || @best&.title || @disc.disc_name, size: 40 %>
+      </label>
+      <label>Year
+        <%= number_field_tag :confirmed_year, @disc.confirmed_year || @best&.year, min: 1900, max: 2100 %>
+      </label>
+      <label>Kind
+        <%= select_tag :confirmed_kind,
+              options_for_select([["film", "movie"], ["television", "series"]],
+                                 @disc.confirmed_kind || @best&.kind) %>
+      </label>
+      <label>Season
+        <%= number_field_tag :confirmed_season, @disc.confirmed_season || @best&.season, min: 0, max: 99 %>
+      </label>
+      <%# The id that goes into the NFO, and the reason Jellyfin stops guessing.
+          Prefilled when a net found one; typed from a TMDB URL when not. %>
+      <label>TMDB id
+        <%= text_field_tag :provider_id, @disc.provider_id || @best&.provider_id, size: 10 %>
+        <%= hidden_field_tag :provider, @disc.provider.presence || @best&.provider || "tmdb" %>
+      </label>
+    </div>
+
+    <% if @siblings.any? %>
+      <%# The highest-value control on the page: what turns six identically
+          labelled Still Game discs into one decision. %>
+      <label class="check">
+        <%= check_box_tag :apply_to_siblings, "1" %>
+        Apply the title and kind to the <%= @siblings.size %> other disc<%= "s" if @siblings.size != 1 %>
+        labelled <code><%= @disc.volume_label %></code>
+        <span class="muted">(episode numbers stay per-disc)</span>
+      </label>
+    <% end %>
+  </section>
+
+  <section class="panel">
+    <h2>Titles <span class="muted"><%= @disc.disc_titles.size %></span></h2>
+    <p class="muted">
+      A disc carries no episode numbers, so nothing can infer them. Extras must
+      not be numbered as episodes — Jellyfin files them separately, which is what
+      stops a featurette being offered as another version of the feature.
+    </p>
+    <table class="titles">
+      <thead><tr><th>#</th><th>runtime</th><th>ch</th><th>a/s</th><th>role</th><th>season</th><th>episode</th><th>episode title</th></tr></thead>
+      <tbody>
+        <% @disc.disc_titles.order(:index).each do |t| %>
+          <tr>
+            <td><%= format("t%02d", t.index) %></td>
+            <td class="num"><%= t.runtime %></td>
+            <td class="num"><%= t.chapters %></td>
+            <td class="num muted"><%= t.audio_count %>/<%= t.subtitle_count %></td>
+            <td><%= select_tag "titles[#{t.index}][role]",
+                     options_for_select([%w[— unknown], %w[feature feature], %w[episode episode],
+                                         %w[extra extra], ["ignore", "ignore"]], t.role) %></td>
+            <td><%= number_field_tag "titles[#{t.index}][season_number]", t.season_number, min: 0, max: 99, class: "narrow" %></td>
+            <td><%= number_field_tag "titles[#{t.index}][episode_number]", t.episode_number, min: 0, max: 999, class: "narrow" %></td>
+            <td><%= text_field_tag "titles[#{t.index}][episode_title]", t.episode_title, size: 24 %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <%= submit_tag "Confirm", class: "primary" %>
+    <% if @disc.status == "confirmed" %>
+      <%= link_to "Reopen", reopen_review_path(@disc), data: { turbo_method: :post }, class: "muted" %>
+    <% end %>
+  </section>
+<% end %>

@@ -1,0 +1,47 @@
+[Unit]
+Description=hellbox disc ripping daemon
+Documentation=https://github.com/charris/hellbox
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=@PREFIX@/bin/hellboxd -config @CONFIG_DIR@/config.toml
+Restart=on-failure
+RestartSec=5
+
+# hellboxd runs as a normal user, not root. It needs the optical device (cdrom)
+# and its media directories, and nothing more.
+User=@USER@
+Group=@GROUP@
+SupplementaryGroups=cdrom
+
+# The socket lives in /run/hellbox, created by systemd on each boot.
+RuntimeDirectory=hellbox
+RuntimeDirectoryMode=0750
+StateDirectory=hellbox
+StateDirectoryMode=0750
+
+# A rip in flight should be allowed to finish being signalled rather than
+# killed: makemkvcon is sent SIGINT and given time to close its output cleanly.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+# Modest hardening. The daemon writes only to its state directory and the media
+# tree, so most of the filesystem can be closed off. ProtectSystem=full leaves
+# /srv writable, which is where the rips go.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+# MakeMKV keeps its registration key in the running user's home directory, and
+# hellboxd rewrites it when the published beta key changes — without which the
+# daemon would stop ripping every few weeks. The rest of the home directory
+# stays read-only.
+ProtectHome=read-only
+ReadWritePaths=@HOME@/.MakeMKV
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

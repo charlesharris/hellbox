@@ -1,0 +1,38 @@
+# Development image for slay.
+#
+# Rails ships a production Dockerfile of its own, which precompiles assets and
+# bakes the app into the image. That is the wrong shape here: the app is
+# bind-mounted so it can be edited without a rebuild, and this appliance has no
+# deploy step to speak of.
+FROM ruby:3.3
+
+# libpq for the pg gem; the rest is what native extensions want. No node or
+# yarn: Rails 8 uses importmaps and Propshaft, so there is no JavaScript build.
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+      build-essential libpq-dev libyaml-dev git curl \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Bundle into a named volume shared across rebuilds, so changing the Gemfile
+# does not mean reinstalling everything.
+ENV BUNDLE_PATH=/usr/local/bundle \
+    BUNDLE_JOBS=4 \
+    RAILS_ENV=development
+
+# Gemfile only, so a code change does not invalidate the bundle layer.
+COPY Gemfile Gemfile.lock* ./
+RUN bundle install || true
+
+COPY . .
+
+EXPOSE 3000
+
+# entrypoint waits for the database and clears a stale server pid, which is the
+# one thing that reliably stops a bind-mounted Rails container from restarting.
+COPY bin/docker-dev-entrypoint /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-dev-entrypoint
+ENTRYPOINT ["docker-dev-entrypoint"]
+
+CMD ["bin/rails", "server", "-b", "0.0.0.0", "-p", "3000"]
