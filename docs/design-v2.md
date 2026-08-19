@@ -405,6 +405,15 @@ self-describing (invariant 2) and Rails can reconcile from the filesystem alone.
    isolated by comparison. Every one of those was available on 2026-08-08 and
    is not now.
 
+   **And one drive is the target, not a temporary shortage.** *(Added
+   2026-08-19.)* The speed figures above explain which drive was kept; they do
+   not explain why a second is not simply plugged back in. The reason is the
+   bus: the drives are USB and share one, and two of them reading at once does
+   not halve each one's throughput, it collapses both. So `discSlot`
+   serialising disc work across every drive stays whatever the drive count, and
+   anyone re-adding a drive is buying a spare to swap to, not a second worker
+   to run beside this one. See §10.5.
+
    > **The one untested combination is now the only combination.** Phase A
    > proved native CSS decryption on the ASUS, which had *no region set*. This
    > drive is **locked to region 1** with 4 changes left. A region 1 disc is
@@ -1144,24 +1153,42 @@ is the moment the whole design pays out.
    them and nothing in this design handles them.
 4. **`/srv/media/arm`.** Still listed as unresolved in v1. Confirm it holds
    nothing wanted, then delete it deliberately, never from a setup script.
-5. **Single drive, and what that costs.** *(Was "second drive"; the ASUS was
-   removed 2026-08-09.)* `discSlot` still serialises disc work, which is now
-   free rather than a tradeoff — there is nothing to contend with. The open
-   questions are the ones a single drive creates rather than answers:
+5. **Single drive. Settled 2026-08-19, and for a better reason than was
+   recorded here.** *(Was "second drive"; the ASUS was removed 2026-08-09.)*
 
-   - **Throughput is halved by construction.** Two drives could read two discs
-     at once. A shelf-sized backlog now runs strictly serially, at a per-disc
-     rate that has not been measured on this drive (B.5).
+   This entry used to say the second drive went because it was the slower one
+   and could not read Blu-ray, and that `discSlot` serialising disc work was
+   "now free rather than a tradeoff — there is nothing to contend with". Both
+   halves understate it.
+
+   **The drives share a USB bus, and two of them working at once does not halve
+   each one's throughput — it collapses both.** So one drive is the
+   configuration, not an accident of which one happened to fail, and
+   serialisation is load-bearing rather than vestigial. `discSlot` is what
+   would protect the bus if a drive were ever plugged back in; it reads like
+   caution with nothing to guard and it is not. Said again in
+   `internal/daemon/worker.go`, where someone might otherwise delete it.
+
+   This also settles a contradiction between this file and
+   `where-things-stand.md`, which still described two drives as current.
+
+   What one drive costs, unchanged:
+
+   - **Throughput is bounded by the bus, not the backlog.** A shelf-sized
+     queue runs strictly serially and a second drive would not fix it.
    - **A drive fault is unfalsifiable.** Every "is it the disc or the drive?"
-     question answered during Phase A was answered by comparison. That tool is
-     gone; a failing drive will now look exactly like a shelf of bad discs.
-   - **Region 2 has no fallback.** The remaining drive is region-locked and
-     untested against region 2 (invariant 5).
+     question in Phase A was answered by comparison against the other drive.
+     That tool is gone; a failing drive now looks exactly like a shelf of bad
+     discs.
+   - **Region 2 has no fallback.** The remaining drive is region-locked to
+     region 1 with four changes left, and is untested against region 2
+     (invariant 5). The drive with the unspent counter is the one that left.
+   - **The MakeMKV fallback does not work on this hardware.** MakeMKV hangs on
+     every disc in the remaining drive — proven by the same disc, binary and
+     key succeeding in the drive that has since been removed. `native_dvd =
+     false` is therefore a switch to a path that hangs, not a way out of
+     trouble. It costs nothing to keep and must not be relied on.
 
-   None of this argues against the decision — the removed drive was the slower
-   one and could not read Blu-ray at all. It argues for keeping multi-drive
-   support working rather than simplifying it away, because the code already
-   handles N drives and re-adding one should stay a matter of plugging it in.
 6. **Cross-platform hardware support. Closed 2026-08-19: no.** Raised because
    development moved to a Mac and the drives did not. hellboxd talks to drives
    through Linux ioctls — CDROM_DRIVE_STATUS, and SG_IO for region, protection

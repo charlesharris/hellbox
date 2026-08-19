@@ -67,6 +67,12 @@ type Worker struct {
 	// rip is bound by its drive and a decrypt by its disc, but both share one
 	// set of disks with the transcode queue, and running two at once makes each
 	// slower without finishing any sooner.
+	//
+	// The stronger reason is the bus. The drives are USB and they share it, so
+	// two of them reading at once does not halve each one's throughput — it
+	// collapses both. This is why the machine runs one drive, and it is why
+	// this slot must survive a second one being plugged in. It reads like
+	// vestigial caution with a single drive attached; it is not.
 	discSlot chan struct{}
 
 	// cancelWork aborts whatever the drive is doing — a scan, a decrypt, or a

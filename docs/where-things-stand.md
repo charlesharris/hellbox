@@ -54,33 +54,50 @@ address tables so both paths agree. Not worth blocking on.
 
 ## Hardware reality
 
-**Two drives, and each is the only one that can do something.**
+**One drive. `/dev/sr1`, an HL-DT-ST BD-RE BT10N.**
 
-| | `/dev/sr0` — ASUS SDRW-08D2S-U | `/dev/sr1` — HL-DT-ST BD-RE BT10N |
-|---|---|---|
-| Reads Blu-ray | no | yes |
-| DVD extraction | 1.27–1.34 MB/s (2.6x) | 2.23 MB/s (3.7x) |
-| MakeMKV can use it | **yes** | **no — hangs on every disc** |
-| Region counter | unset, 5 of 5 | locked to region 1, 4 left |
+*Corrected 2026-08-19. This section described two drives as the current
+configuration, which had not been true since the ASUS was removed on
+2026-08-09, and `design-v2.md` §10 said so while this said otherwise.*
 
-So "prefer `sr1` for DVDs because it is faster" is true only while nothing needs
-the MakeMKV fallback. `sr0` is slower and cannot read Blu-ray, and it is the
-only drive half the toolchain works with.
+**The decision is one drive, not an accident of which one broke.** The drives
+are USB and they share a bus; two of them reading at once does not halve each
+one's throughput, it collapses both. That is why `discSlot` serialises disc
+work across every drive and why it has to keep doing so if a drive is ever
+plugged back in — see §10 and `internal/daemon/worker.go`.
 
-`sr0` was called faulty earlier in the project and it is not. That verdict rested
-on a `blkid` timeout, a slow read, and a MakeMKV hang; the hang turned out to
-have nothing to do with it, and `blkid` answered instantly on reconnection.
+What the remaining drive can and cannot do:
 
-- **MakeMKV hangs on any disc in `sr1`** — not BD+, not the install, not the key.
-  Proven by the same disc, binary and key succeeding in `sr0` (exit 0, full title
-  list) and hanging in `sr1`. Four explanations were tried before this one and
-  three were wrong; the discriminating test needed the second drive.
+| | `/dev/sr1` — HL-DT-ST BD-RE BT10N |
+|---|---|
+| Reads Blu-ray | yes — and it is the only one that ever could |
+| DVD extraction | 2.23 MB/s (3.7x) — the faster of the two |
+| MakeMKV can use it | **no — hangs on every disc** |
+| Region counter | locked to region 1, 4 changes left |
+
+Three consequences worth being explicit about, because each one is a trap:
+
+- **The MakeMKV fallback is dead on this hardware.** MakeMKV hangs on every
+  disc in this drive. That was proven by the same disc, binary and key
+  succeeding in the ASUS (exit 0, full title list) and hanging here — four
+  explanations were tried before this one and three were wrong, and the
+  discriminating test needed the second drive, which is now gone. So
+  `native_dvd = false` switches to a path that hangs. It costs nothing to keep
+  wired and must not be relied on.
+- **A drive fault is now unfalsifiable.** Every "is it the disc or the drive?"
+  question in Phase A was answered by comparison. A failing drive will look
+  exactly like a shelf of bad discs.
+- **Region 2 is untested and has no fallback.** This drive is locked to region
+  1 with four changes left. The drive with the unspent five-of-five counter is
+  the one that left.
+
+Unchanged and still true:
+
 - **BD+ has no working path** in the free stack — that is libbdplus, observed
-  directly, and unrelated to the above. Whether MakeMKV could handle BD+ is
-  still unknown, because it has never been given a BD+ disc in a drive it can
-  read, and only `sr1` reads Blu-ray. **That combination may be untestable on
-  this hardware.**
-- **A region 2 DVD** is untested. Put it in `sr0`, which has an unspent counter.
+  directly. Whether MakeMKV could handle BD+ is still unknown, because it has
+  never been given a BD+ disc in a drive it can read, and this is the only
+  drive that reads Blu-ray. **That combination is untestable on this
+  hardware.**
 - **`www.makemkv.com` is down (525) but the forum is up (200)**, so v1's key
   refresh path still works when the main site does not.
 
